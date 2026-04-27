@@ -1,15 +1,13 @@
 import os
-
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Float, Date, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from pydantic import BaseModel
 from datetime import date
 
-# 1. Configuración de Base de Datos
+# --- 1. Configuración de Base de Datos ---
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./mascotas.db")
-# Render usa postgres:// pero SQLAlchemy requiere postgresql://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -17,7 +15,7 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. Modelos de Base de Datos (SQLAlchemy)
+# --- 2. Modelos de Base de Datos (SQLAlchemy) ---
 class Mascota(Base):
     __tablename__ = "mascotas"
     id = Column(Integer, primary_key=True, index=True)
@@ -36,12 +34,11 @@ class HistorialConsumo(Base):
     id_mascota = Column(Integer, ForeignKey("mascotas.id"))
     id_alimento = Column(Integer, ForeignKey("alimentos.id"))
     fecha = Column(Date)
-    cantidad = Column(Float) # En gramos o porciones
+    cantidad = Column(Float)
 
-# Crea las tablas si no existen
 Base.metadata.create_all(bind=engine)
 
-# 3. Configuración de FastAPI
+# --- 3. Configuración de FastAPI ---
 app = FastAPI()
 
 app.add_middleware(
@@ -58,12 +55,25 @@ def get_db():
     finally:
         db.close()
 
-# 4. Esquemas Pydantic (Para validar los datos que entran por POST)
+# --- 4. Esquemas Pydantic ---
 class MascotaCreate(BaseModel):
     nombre: str
     especie: str
 
-# 5. Endpoints de ejemplo
+class AlimentoCreate(BaseModel):
+    marca: str
+    tipo: str
+
+class HistorialCreate(BaseModel):
+    id_mascota: int
+    id_alimento: int
+    fecha: date
+    cantidad: float
+
+# ==========================================
+# --- 5. ENDPOINTS MASCOTAS ---
+# ==========================================
+
 @app.post("/mascotas/")
 def crear_mascota(mascota: MascotaCreate, db: Session = Depends(get_db)):
     db_mascota = Mascota(nombre=mascota.nombre, especie=mascota.especie)
@@ -76,19 +86,36 @@ def crear_mascota(mascota: MascotaCreate, db: Session = Depends(get_db)):
 def leer_mascotas(db: Session = Depends(get_db)):
     return db.query(Mascota).all()
 
-# --- Esquemas Pydantic adicionales ---
+@app.get("/mascotas/{mascota_id}")
+def leer_mascota(mascota_id: int, db: Session = Depends(get_db)):
+    mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
+    if not mascota:
+        raise HTTPException(status_code=404, detail="Mascota no encontrada")
+    return mascota
 
-class AlimentoCreate(BaseModel):
-    marca: str
-    tipo: str
+@app.put("/mascotas/{mascota_id}")
+def actualizar_mascota(mascota_id: int, mascota: MascotaCreate, db: Session = Depends(get_db)):
+    db_mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
+    if not db_mascota:
+        raise HTTPException(status_code=404, detail="Mascota no encontrada")
+    db_mascota.nombre = mascota.nombre
+    db_mascota.especie = mascota.especie
+    db.commit()
+    db.refresh(db_mascota)
+    return db_mascota
 
-class HistorialCreate(BaseModel):
-    id_mascota: int
-    id_alimento: int
-    fecha: date
-    cantidad: float
+@app.delete("/mascotas/{mascota_id}")
+def eliminar_mascota(mascota_id: int, db: Session = Depends(get_db)):
+    db_mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
+    if not db_mascota:
+        raise HTTPException(status_code=404, detail="Mascota no encontrada")
+    db.delete(db_mascota)
+    db.commit()
+    return {"mensaje": "Mascota eliminada exitosamente"}
 
-# --- Endpoints para Alimentos ---
+# ==========================================
+# --- 6. ENDPOINTS ALIMENTOS ---
+# ==========================================
 
 @app.post("/alimentos/")
 def crear_alimento(alimento: AlimentoCreate, db: Session = Depends(get_db)):
@@ -102,8 +129,36 @@ def crear_alimento(alimento: AlimentoCreate, db: Session = Depends(get_db)):
 def leer_alimentos(db: Session = Depends(get_db)):
     return db.query(Alimento).all()
 
+@app.get("/alimentos/{alimento_id}")
+def leer_alimento(alimento_id: int, db: Session = Depends(get_db)):
+    alimento = db.query(Alimento).filter(Alimento.id == alimento_id).first()
+    if not alimento:
+        raise HTTPException(status_code=404, detail="Alimento no encontrado")
+    return alimento
 
-# --- Endpoints para Historial de Consumo ---
+@app.put("/alimentos/{alimento_id}")
+def actualizar_alimento(alimento_id: int, alimento: AlimentoCreate, db: Session = Depends(get_db)):
+    db_alimento = db.query(Alimento).filter(Alimento.id == alimento_id).first()
+    if not db_alimento:
+        raise HTTPException(status_code=404, detail="Alimento no encontrado")
+    db_alimento.marca = alimento.marca
+    db_alimento.tipo = alimento.tipo
+    db.commit()
+    db.refresh(db_alimento)
+    return db_alimento
+
+@app.delete("/alimentos/{alimento_id}")
+def eliminar_alimento(alimento_id: int, db: Session = Depends(get_db)):
+    db_alimento = db.query(Alimento).filter(Alimento.id == alimento_id).first()
+    if not db_alimento:
+        raise HTTPException(status_code=404, detail="Alimento no encontrado")
+    db.delete(db_alimento)
+    db.commit()
+    return {"mensaje": "Alimento eliminado exitosamente"}
+
+# ==========================================
+# --- 7. ENDPOINTS HISTORIAL DE CONSUMO ---
+# ==========================================
 
 @app.post("/historial/")
 def crear_historial(historial: HistorialCreate, db: Session = Depends(get_db)):
@@ -121,3 +176,38 @@ def crear_historial(historial: HistorialCreate, db: Session = Depends(get_db)):
 @app.get("/historial/")
 def leer_historial(db: Session = Depends(get_db)):
     return db.query(HistorialConsumo).all()
+
+@app.get("/historial/{historial_id}")
+def leer_registro_historial(historial_id: int, db: Session = Depends(get_db)):
+    registro = db.query(HistorialConsumo).filter(HistorialConsumo.id == historial_id).first()
+    if not registro:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    return registro
+
+@app.put("/historial/{historial_id}")
+def actualizar_historial(historial_id: int, historial: HistorialCreate, db: Session = Depends(get_db)):
+    db_historial = db.query(HistorialConsumo).filter(HistorialConsumo.id == historial_id).first()
+    if not db_historial:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    db_historial.id_mascota = historial.id_mascota
+    db_historial.id_alimento = historial.id_alimento
+    db_historial.fecha = historial.fecha
+    db_historial.cantidad = historial.cantidad
+    db.commit()
+    db.refresh(db_historial)
+    return db_historial
+
+@app.delete("/historial/{historial_id}")
+def eliminar_historial(historial_id: int, db: Session = Depends(get_db)):
+    db_historial = db.query(HistorialConsumo).filter(HistorialConsumo.id == historial_id).first()
+    if not db_historial:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    db.delete(db_historial)
+    db.commit()
+    return {"mensaje": "Registro eliminado exitosamente"}
+
+# --- Endpoint Relacional ---
+@app.get("/mascotas/{mascota_id}/historial")
+def historial_por_mascota(mascota_id: int, db: Session = Depends(get_db)):
+    registros = db.query(HistorialConsumo).filter(HistorialConsumo.id_mascota == mascota_id).all()
+    return registros
