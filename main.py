@@ -1,10 +1,9 @@
 import os
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Float, Date, ForeignKey
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
-from pydantic import BaseModel
-from datetime import date
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
+from pydantic import BaseModel, ConfigDict
 
 # --- 1. Configuración de Base de Datos ---
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./mascotas.db")
@@ -21,20 +20,19 @@ class Mascota(Base):
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String, index=True)
     especie = Column(String)
+    
+    # Relación de Maestro hacia Detalle (cascade borra el detalle si borras la mascota)
+    detalles = relationship("RegistroComida", back_populates="mascota", cascade="all, delete-orphan")
 
-class Alimento(Base):
-    __tablename__ = "alimentos"
-    id = Column(Integer, primary_key=True, index=True)
-    marca = Column(String)
-    tipo = Column(String)
-
-class HistorialConsumo(Base):
-    __tablename__ = "historial_consumo"
+class RegistroComida(Base):
+    __tablename__ = "registros_comida"
     id = Column(Integer, primary_key=True, index=True)
     id_mascota = Column(Integer, ForeignKey("mascotas.id"))
-    id_alimento = Column(Integer, ForeignKey("alimentos.id"))
-    fecha = Column(Date)
+    alimento = Column(String) # Guardamos el nombre directo, sin tabla extra
     cantidad = Column(Float)
+    
+    # Relación inversa
+    mascota = relationship("Mascota", back_populates="detalles")
 
 Base.metadata.create_all(bind=engine)
 
@@ -55,159 +53,51 @@ def get_db():
     finally:
         db.close()
 
-# --- 4. Esquemas Pydantic ---
+# --- 4. Esquemas Pydantic (La clave del Maestro-Detalle) ---
+class RegistroComidaCreate(BaseModel):
+    alimento: str
+    cantidad: float
+
+class RegistroComidaOut(RegistroComidaCreate):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
 class MascotaCreate(BaseModel):
     nombre: str
     especie: str
+    # Lista anidada: Permite enviar detalles al crear el maestro
+    detalles: list[RegistroComidaCreate] = []
 
-class AlimentoCreate(BaseModel):
-    marca: str
-    tipo: str
+class MascotaOut(BaseModel):
+    id: int
+    nombre: str
+    especie: str
+    detalles: list[RegistroComidaOut] = []
+    model_config = ConfigDict(from_attributes=True)
 
-class HistorialCreate(BaseModel):
-    id_mascota: int
-    id_alimento: int
-    fecha: date
-    cantidad: float
+# --- 5. Endpoints Maestro-Detalle ---
 
-# ==========================================
-# --- 5. ENDPOINTS MASCOTAS ---
-# ==========================================
-
-@app.post("/mascotas/")
-def crear_mascota(mascota: MascotaCreate, db: Session = Depends(get_db)):
-    db_mascota = Mascota(nombre=mascota.nombre, especie=mascota.especie)
+@app.post("/mascotas/", response_model=MascotaOut)
+def crear_mascota_con_detalles(mascota_data: MascotaCreate, db: Session = Depends(get_db)):
+    # 1. Crear el Maestro
+    db_mascota = Mascota(nombre=mascota_data.nombre, especie=mascota_data.especie)
     db.add(db_mascota)
+    db.flush() # flush asigna el ID a db_mascota sin cerrar la transacción
+    
+    # 2. Crear los Detalles usando el ID recién generado
+    for detalle in mascota_data.detalles:
+        db_detalle = RegistroComida(
+            id_mascota=db_mascota.id,
+            alimento=detalle.alimento,
+            cantidad=detalle.cantidad
+        )
+        db.add(db_detalle)
+        
     db.commit()
     db.refresh(db_mascota)
     return db_mascota
 
-@app.get("/mascotas/")
-def leer_mascotas(db: Session = Depends(get_db)):
+@app.get("/mascotas/", response_model=list[MascotaOut])
+def leer_mascotas_con_detalles(db: Session = Depends(get_db)):
+    # Al retornar esto, FastAPI y Pydantic arman el JSON anidado automáticamente
     return db.query(Mascota).all()
-
-@app.get("/mascotas/{mascota_id}")
-def leer_mascota(mascota_id: int, db: Session = Depends(get_db)):
-    mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
-    if not mascota:
-        raise HTTPException(status_code=404, detail="Mascota no encontrada")
-    return mascota
-
-@app.put("/mascotas/{mascota_id}")
-def actualizar_mascota(mascota_id: int, mascota: MascotaCreate, db: Session = Depends(get_db)):
-    db_mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
-    if not db_mascota:
-        raise HTTPException(status_code=404, detail="Mascota no encontrada")
-    db_mascota.nombre = mascota.nombre
-    db_mascota.especie = mascota.especie
-    db.commit()
-    db.refresh(db_mascota)
-    return db_mascota
-
-@app.delete("/mascotas/{mascota_id}")
-def eliminar_mascota(mascota_id: int, db: Session = Depends(get_db)):
-    db_mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
-    if not db_mascota:
-        raise HTTPException(status_code=404, detail="Mascota no encontrada")
-    db.delete(db_mascota)
-    db.commit()
-    return {"mensaje": "Mascota eliminada exitosamente"}
-
-# ==========================================
-# --- 6. ENDPOINTS ALIMENTOS ---
-# ==========================================
-
-@app.post("/alimentos/")
-def crear_alimento(alimento: AlimentoCreate, db: Session = Depends(get_db)):
-    db_alimento = Alimento(marca=alimento.marca, tipo=alimento.tipo)
-    db.add(db_alimento)
-    db.commit()
-    db.refresh(db_alimento)
-    return db_alimento
-
-@app.get("/alimentos/")
-def leer_alimentos(db: Session = Depends(get_db)):
-    return db.query(Alimento).all()
-
-@app.get("/alimentos/{alimento_id}")
-def leer_alimento(alimento_id: int, db: Session = Depends(get_db)):
-    alimento = db.query(Alimento).filter(Alimento.id == alimento_id).first()
-    if not alimento:
-        raise HTTPException(status_code=404, detail="Alimento no encontrado")
-    return alimento
-
-@app.put("/alimentos/{alimento_id}")
-def actualizar_alimento(alimento_id: int, alimento: AlimentoCreate, db: Session = Depends(get_db)):
-    db_alimento = db.query(Alimento).filter(Alimento.id == alimento_id).first()
-    if not db_alimento:
-        raise HTTPException(status_code=404, detail="Alimento no encontrado")
-    db_alimento.marca = alimento.marca
-    db_alimento.tipo = alimento.tipo
-    db.commit()
-    db.refresh(db_alimento)
-    return db_alimento
-
-@app.delete("/alimentos/{alimento_id}")
-def eliminar_alimento(alimento_id: int, db: Session = Depends(get_db)):
-    db_alimento = db.query(Alimento).filter(Alimento.id == alimento_id).first()
-    if not db_alimento:
-        raise HTTPException(status_code=404, detail="Alimento no encontrado")
-    db.delete(db_alimento)
-    db.commit()
-    return {"mensaje": "Alimento eliminado exitosamente"}
-
-# ==========================================
-# --- 7. ENDPOINTS HISTORIAL DE CONSUMO ---
-# ==========================================
-
-@app.post("/historial/")
-def crear_historial(historial: HistorialCreate, db: Session = Depends(get_db)):
-    db_historial = HistorialConsumo(
-        id_mascota=historial.id_mascota,
-        id_alimento=historial.id_alimento,
-        fecha=historial.fecha,
-        cantidad=historial.cantidad
-    )
-    db.add(db_historial)
-    db.commit()
-    db.refresh(db_historial)
-    return db_historial
-
-@app.get("/historial/")
-def leer_historial(db: Session = Depends(get_db)):
-    return db.query(HistorialConsumo).all()
-
-@app.get("/historial/{historial_id}")
-def leer_registro_historial(historial_id: int, db: Session = Depends(get_db)):
-    registro = db.query(HistorialConsumo).filter(HistorialConsumo.id == historial_id).first()
-    if not registro:
-        raise HTTPException(status_code=404, detail="Registro no encontrado")
-    return registro
-
-@app.put("/historial/{historial_id}")
-def actualizar_historial(historial_id: int, historial: HistorialCreate, db: Session = Depends(get_db)):
-    db_historial = db.query(HistorialConsumo).filter(HistorialConsumo.id == historial_id).first()
-    if not db_historial:
-        raise HTTPException(status_code=404, detail="Registro no encontrado")
-    db_historial.id_mascota = historial.id_mascota
-    db_historial.id_alimento = historial.id_alimento
-    db_historial.fecha = historial.fecha
-    db_historial.cantidad = historial.cantidad
-    db.commit()
-    db.refresh(db_historial)
-    return db_historial
-
-@app.delete("/historial/{historial_id}")
-def eliminar_historial(historial_id: int, db: Session = Depends(get_db)):
-    db_historial = db.query(HistorialConsumo).filter(HistorialConsumo.id == historial_id).first()
-    if not db_historial:
-        raise HTTPException(status_code=404, detail="Registro no encontrado")
-    db.delete(db_historial)
-    db.commit()
-    return {"mensaje": "Registro eliminado exitosamente"}
-
-# --- Endpoint Relacional ---
-@app.get("/mascotas/{mascota_id}/historial")
-def historial_por_mascota(mascota_id: int, db: Session = Depends(get_db)):
-    registros = db.query(HistorialConsumo).filter(HistorialConsumo.id_mascota == mascota_id).all()
-    return registros
