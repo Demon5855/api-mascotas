@@ -68,7 +68,6 @@ class MascotaCreate(BaseModel):
     # Lista anidada: Permite enviar detalles al crear el maestro
     registroComidas: list[RegistroComidaCreate] = []
 
-    # Esto inyecta un ejemplo visual directo en Swagger UI
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -93,7 +92,27 @@ class MascotaOut(BaseModel):
     nombre: str
     especie: str
     registroComidas: list[RegistroComidaOut] = []
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": 0,
+                "nombre": "string",
+                "especie": "string",
+                "registroComidas": [
+                    {
+                        "id": 0,
+                        "alimento": "string",
+                        "cantidad": 0.0
+                    },
+                    {
+                        "id": 0,
+                        "alimento": "string",
+                        "cantidad": 0.0
+                    }
+                ]
+            }
+        }
+    )
 
 # --- 5. Endpoints Maestro-Detalle ---
 
@@ -121,8 +140,6 @@ def crear_mascota_con_registroComidas(mascota_data: MascotaCreate, db: Session =
 def leer_mascotas_con_registroComidas(db: Session = Depends(get_db)):
     # Al retornar esto, FastAPI y Pydantic arman el JSON anidado automáticamente
     return db.query(Mascota).all()
-
-    # --- Endpoints faltantes para completar el CRUD Maestro-Detalle ---
 
 @app.put("/mascotas/{mascota_id}", response_model=MascotaOut)
 def actualizar_mascota_con_registroComidas(mascota_id: int, mascota_data: MascotaCreate, db: Session = Depends(get_db)):
