@@ -22,7 +22,7 @@ class Mascota(Base):
     especie = Column(String)
     
     # Relación de Maestro hacia Detalle (cascade borra el detalle si borras la mascota)
-    detalles = relationship("RegistroComida", back_populates="mascota", cascade="all, delete-orphan")
+    registroComidas = relationship("RegistroComida", back_populates="mascota", cascade="all, delete-orphan")
 
 class RegistroComida(Base):
     __tablename__ = "registros_comida"
@@ -32,7 +32,7 @@ class RegistroComida(Base):
     cantidad = Column(Float)
     
     # Relación inversa
-    mascota = relationship("Mascota", back_populates="detalles")
+    mascota = relationship("Mascota", back_populates="registroComidas")
 
 Base.metadata.create_all(bind=engine)
 
@@ -66,26 +66,26 @@ class MascotaCreate(BaseModel):
     nombre: str
     especie: str
     # Lista anidada: Permite enviar detalles al crear el maestro
-    detalles: list[RegistroComidaCreate] = []
+    registroComidas: list[RegistroComidaCreate] = []
 
 class MascotaOut(BaseModel):
     id: int
     nombre: str
     especie: str
-    detalles: list[RegistroComidaOut] = []
+    registroComidas: list[RegistroComidaOut] = []
     model_config = ConfigDict(from_attributes=True)
 
 # --- 5. Endpoints Maestro-Detalle ---
 
 @app.post("/mascotas/", response_model=MascotaOut)
-def crear_mascota_con_detalles(mascota_data: MascotaCreate, db: Session = Depends(get_db)):
+def crear_mascota_con_registroComidas(mascota_data: MascotaCreate, db: Session = Depends(get_db)):
     # 1. Crear el Maestro
     db_mascota = Mascota(nombre=mascota_data.nombre, especie=mascota_data.especie)
     db.add(db_mascota)
     db.flush() # flush asigna el ID a db_mascota sin cerrar la transacción
     
     # 2. Crear los Detalles usando el ID recién generado
-    for detalle in mascota_data.detalles:
+    for detalle in mascota_data.registroComidas:
         db_detalle = RegistroComida(
             id_mascota=db_mascota.id,
             alimento=detalle.alimento,
@@ -98,14 +98,14 @@ def crear_mascota_con_detalles(mascota_data: MascotaCreate, db: Session = Depend
     return db_mascota
 
 @app.get("/mascotas/", response_model=list[MascotaOut])
-def leer_mascotas_con_detalles(db: Session = Depends(get_db)):
+def leer_mascotas_con_registroComidas(db: Session = Depends(get_db)):
     # Al retornar esto, FastAPI y Pydantic arman el JSON anidado automáticamente
     return db.query(Mascota).all()
 
     # --- Endpoints faltantes para completar el CRUD Maestro-Detalle ---
 
 @app.put("/mascotas/{mascota_id}", response_model=MascotaOut)
-def actualizar_mascota_con_detalles(mascota_id: int, mascota_data: MascotaCreate, db: Session = Depends(get_db)):
+def actualizar_mascota_con_registroComidas(mascota_id: int, mascota_data: MascotaCreate, db: Session = Depends(get_db)):
     # 1. Buscar el Maestro
     db_mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
     if not db_mascota:
@@ -120,7 +120,7 @@ def actualizar_mascota_con_detalles(mascota_id: int, mascota_data: MascotaCreate
     db.query(RegistroComida).filter(RegistroComida.id_mascota == mascota_id).delete()
     
     # Luego insertamos los nuevos que vienen en el JSON
-    for detalle in mascota_data.detalles:
+    for detalle in mascota_data.registroComidas:
         db_detalle = RegistroComida(
             id_mascota=mascota_id,
             alimento=detalle.alimento,
@@ -133,7 +133,7 @@ def actualizar_mascota_con_detalles(mascota_id: int, mascota_data: MascotaCreate
     return db_mascota
 
 @app.delete("/mascotas/{mascota_id}")
-def eliminar_mascota_con_detalles(mascota_id: int, db: Session = Depends(get_db)):
+def eliminar_mascota_con_registroComidas(mascota_id: int, db: Session = Depends(get_db)):
     # 1. Buscar el Maestro
     db_mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
     if not db_mascota:
