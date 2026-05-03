@@ -141,6 +141,13 @@ def leer_mascotas_con_registroComidas(db: Session = Depends(get_db)):
     # Al retornar esto, FastAPI y Pydantic arman el JSON anidado automáticamente
     return db.query(Mascota).all()
 
+@app.get("/mascotas/{mascota_id}", response_model=MascotaOut)
+def leer_mascota_con_registroComidas(mascota_id: int, db: Session = Depends(get_db)):
+    db_mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
+    if not db_mascota:
+        raise HTTPException(status_code=404, detail="Mascota no encontrada")
+    return db_mascota
+
 @app.put("/mascotas/{mascota_id}", response_model=MascotaOut)
 def actualizar_mascota_con_registroComidas(mascota_id: int, mascota_data: MascotaCreate, db: Session = Depends(get_db)):
     # 1. Buscar el Maestro
