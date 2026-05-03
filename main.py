@@ -68,6 +68,26 @@ class MascotaCreate(BaseModel):
     # Lista anidada: Permite enviar detalles al crear el maestro
     registroComidas: list[RegistroComidaCreate] = []
 
+    # Esto inyecta un ejemplo visual directo en Swagger UI
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "nombre": "string",
+                "especie": "string",
+                "registroComidas": [
+                    {
+                        "alimento": "string",
+                        "cantidad": 0.0
+                    },
+                    {
+                        "alimento": "string",
+                        "cantidad": 0.0
+                    }
+                ]
+            }
+        }
+    )
+
 class MascotaOut(BaseModel):
     id: int
     nombre: str
@@ -85,13 +105,13 @@ def crear_mascota_con_registroComidas(mascota_data: MascotaCreate, db: Session =
     db.flush() # flush asigna el ID a db_mascota sin cerrar la transacción
     
     # 2. Crear los Detalles usando el ID recién generado
-    for detalle in mascota_data.registroComidas:
-        db_detalle = RegistroComida(
+    for registro in mascota_data.registroComidas:
+        db_registroComida = RegistroComida(
             id_mascota=db_mascota.id,
-            alimento=detalle.alimento,
-            cantidad=detalle.cantidad
+            alimento=registro.alimento,
+            cantidad=registro.cantidad
         )
-        db.add(db_detalle)
+        db.add(db_registroComida)
         
     db.commit()
     db.refresh(db_mascota)
@@ -120,13 +140,13 @@ def actualizar_mascota_con_registroComidas(mascota_id: int, mascota_data: Mascot
     db.query(RegistroComida).filter(RegistroComida.id_mascota == mascota_id).delete()
     
     # Luego insertamos los nuevos que vienen en el JSON
-    for detalle in mascota_data.registroComidas:
-        db_detalle = RegistroComida(
+    for registro in mascota_data.registroComidas:
+        db_registroComida = RegistroComida(
             id_mascota=mascota_id,
-            alimento=detalle.alimento,
-            cantidad=detalle.cantidad
+            alimento=registro.alimento,
+            cantidad=registro.cantidad
         )
-        db.add(db_detalle)
+        db.add(db_registroComida)
 
     db.commit()
     db.refresh(db_mascota)
