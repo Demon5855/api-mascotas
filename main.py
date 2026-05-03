@@ -101,3 +101,45 @@ def crear_mascota_con_detalles(mascota_data: MascotaCreate, db: Session = Depend
 def leer_mascotas_con_detalles(db: Session = Depends(get_db)):
     # Al retornar esto, FastAPI y Pydantic arman el JSON anidado automáticamente
     return db.query(Mascota).all()
+
+    # --- Endpoints faltantes para completar el CRUD Maestro-Detalle ---
+
+@app.put("/mascotas/{mascota_id}", response_model=MascotaOut)
+def actualizar_mascota_con_detalles(mascota_id: int, mascota_data: MascotaCreate, db: Session = Depends(get_db)):
+    # 1. Buscar el Maestro
+    db_mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
+    if not db_mascota:
+        raise HTTPException(status_code=404, detail="Mascota no encontrada")
+
+    # 2. Actualizar datos del Maestro
+    db_mascota.nombre = mascota_data.nombre
+    db_mascota.especie = mascota_data.especie
+
+    # 3. Reemplazar los Detalles
+    # Primero borramos los registros actuales asociados a esta mascota
+    db.query(RegistroComida).filter(RegistroComida.id_mascota == mascota_id).delete()
+    
+    # Luego insertamos los nuevos que vienen en el JSON
+    for detalle in mascota_data.detalles:
+        db_detalle = RegistroComida(
+            id_mascota=mascota_id,
+            alimento=detalle.alimento,
+            cantidad=detalle.cantidad
+        )
+        db.add(db_detalle)
+
+    db.commit()
+    db.refresh(db_mascota)
+    return db_mascota
+
+@app.delete("/mascotas/{mascota_id}")
+def eliminar_mascota_con_detalles(mascota_id: int, db: Session = Depends(get_db)):
+    # 1. Buscar el Maestro
+    db_mascota = db.query(Mascota).filter(Mascota.id == mascota_id).first()
+    if not db_mascota:
+        raise HTTPException(status_code=404, detail="Mascota no encontrada")
+
+    # 2. Borrar el Maestro (La configuración cascade="all, delete-orphan" en el modelo borrará los detalles automáticamente)
+    db.delete(db_mascota)
+    db.commit()
+    return {"mensaje": "Mascota y su historial eliminados exitosamente"}
