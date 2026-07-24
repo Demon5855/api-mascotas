@@ -28,6 +28,23 @@ class Mascota(Base):
 
 Base.metadata.create_all(bind=engine)
 
+# Hack para agregar columnas automáticamente si no existen (evita error 500 al añadir campos)
+from sqlalchemy import text
+with engine.connect() as conn:
+    try:
+        conn.execute(text("ALTER TABLE mascotas ADD COLUMN raza VARCHAR;"))
+    except Exception:
+        pass
+    try:
+        conn.execute(text("ALTER TABLE mascotas ADD COLUMN edad INTEGER;"))
+    except Exception:
+        pass
+    try:
+        conn.execute(text("ALTER TABLE mascotas ADD COLUMN peso FLOAT;"))
+    except Exception:
+        pass
+    conn.commit()
+
 # --- 3. Configuración de FastAPI ---
 app = FastAPI()
 
